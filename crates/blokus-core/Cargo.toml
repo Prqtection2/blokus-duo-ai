@@ -1,0 +1,17 @@
+[package]
+name = "blokus-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Blokus Duo engine core (pure Rust)."
+
+[lib]
+name = "blokus_core"
+path = "src/lib.rs"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "smoke"
+harness = false

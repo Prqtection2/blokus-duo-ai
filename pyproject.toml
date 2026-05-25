@@ -1,0 +1,13 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "blokus"
+version = "0.1.0"
+description = "Blokus Duo engine (Rust core + Python harness)"
+requires-python = ">=3.10"
+
+[tool.maturin]
+manifest-path = "crates/blokus-py/Cargo.toml"
+module-name = "blokus"

@@ -1,0 +1,14 @@
+[package]
+name = "blokus-py"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "PyO3 bindings for blokus-core."
+
+[lib]
+name = "blokus"
+crate-type = ["cdylib"]
+
+[dependencies]
+blokus-core = { path = "../blokus-core" }
+pyo3 = { version = "0.22", features = ["extension-module", "abi3-py310"] }
