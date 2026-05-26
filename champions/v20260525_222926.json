@@ -1,0 +1,18 @@
+{
+  "created_at": "2026-05-26T03:29:26.227383+00:00",
+  "parent": "phase4_defaults",
+  "promotion_notes": "Coordinate descent over 3 promoted steps (31 rejected). Gauntlet: SPRT(78 games: 66W/12L/0D, LLR=+2.979, bounds=[-2.944, +2.944], decision=accept)  avg margin +10.63  wall 15.4s",
+  "sprt_games": {
+    "draws": 0,
+    "losses": 12,
+    "wins": 66
+  },
+  "sprt_log_lr": 2.979327419454015,
+  "version": "v20260525_222926",
+  "weights": {
+    "corner_count": 80,
+    "piece_liability": -10,
+    "placed_squares": 100,
+    "territory": -40
+  }
+}

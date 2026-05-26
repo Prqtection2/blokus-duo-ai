@@ -154,6 +154,60 @@ pub fn placement_at(
     Some(bb)
 }
 
+/// Precomputed placement bitboards indexed by (oriented_piece_idx, bbox_origin_bit_idx).
+/// `bbox_origin_bit_idx` is `row * 16 + col` where (row, col) is the bbox top-left
+/// in the 16x16 padded grid. Out-of-bounds origins (where the bbox doesn't fit in
+/// the 14x14 playable region) store [`Bitboard::EMPTY`] as a sentinel.
+pub struct PrecomputedPlacements {
+    /// Flat [op_idx * 256 + origin_bit] indexed table — better cache locality
+    /// than a Vec<[Bitboard; 256]> nested layout.
+    table: Vec<Bitboard>,
+}
+
+impl PrecomputedPlacements {
+    fn build() -> Self {
+        let pieces = oriented_pieces();
+        let mut table = vec![Bitboard::EMPTY; pieces.len() * 256];
+        for (op_idx, op) in pieces.iter().enumerate() {
+            for origin_r in 0..PLAY_ROWS as i8 {
+                for origin_c in 0..PLAY_COLS as i8 {
+                    // The bbox must fit in the playable region.
+                    if origin_r + op.height as i8 > PLAY_ROWS as i8 {
+                        continue;
+                    }
+                    if origin_c + op.width as i8 > PLAY_COLS as i8 {
+                        continue;
+                    }
+                    let mut bb = Bitboard::EMPTY;
+                    for &(pr, pc) in &op.cells {
+                        let r = (origin_r + pr) as usize;
+                        let c = (origin_c + pc) as usize;
+                        bb.set_bit(bit_index(r, c));
+                    }
+                    let origin_bit = bit_index(origin_r as usize, origin_c as usize);
+                    table[op_idx * 256 + origin_bit] = bb;
+                }
+            }
+        }
+        Self { table }
+    }
+
+    /// Get the placement bitboard for `op_idx` placed with its bbox top-left at
+    /// `(origin_row, origin_col)`. Returns `Bitboard::EMPTY` if out of bounds.
+    #[inline]
+    pub fn get(&self, op_idx: usize, origin_row: usize, origin_col: usize) -> Bitboard {
+        debug_assert!(op_idx < NUM_ORIENTED_PIECES);
+        debug_assert!(origin_row < 16 && origin_col < 16);
+        self.table[op_idx * 256 + origin_row * 16 + origin_col]
+    }
+}
+
+static PRECOMPUTED: std::sync::OnceLock<PrecomputedPlacements> = std::sync::OnceLock::new();
+
+pub fn precomputed_placements() -> &'static PrecomputedPlacements {
+    PRECOMPUTED.get_or_init(PrecomputedPlacements::build)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

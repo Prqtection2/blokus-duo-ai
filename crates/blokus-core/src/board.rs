@@ -106,12 +106,14 @@ impl Board {
 
     pub fn make_move(&mut self, mv: &Move) {
         self.undo_stack.push(self.snapshot());
+        let prev_passes = self.consecutive_passes;
         match *mv {
             Move::Pass => {
                 self.consecutive_passes = self.consecutive_passes.saturating_add(1);
             }
             Move::Place { piece, placement } => {
                 let p = self.side_to_move as usize;
+                let other = 1 - p;
                 debug_assert!(self.has_piece(p, piece), "piece {piece} already used");
                 self.own[p] = self.own[p] | placement;
                 self.occupied = self.occupied | placement;
@@ -119,6 +121,18 @@ impl Board {
                 let prev_last = self.last_placed[p];
                 self.last_placed[p] = Some(piece);
                 self.consecutive_passes = 0;
+
+                // Incremental mask updates: avoid a full recompute_masks pass.
+                let ortho_pl = placement.ortho_neighbors();
+                let diag_pl = placement.diag_neighbors();
+                self.forbidden[p] = self.forbidden[p] | placement | ortho_pl;
+                // forbidden[other] is unchanged (their own[] hasn't moved).
+                self.corners[p] = (self.corners[p] | diag_pl)
+                    & !self.forbidden[p]
+                    & !self.occupied
+                    & Bitboard::PLAYABLE;
+                // The opponent's corners only lose cells that we just occupied.
+                self.corners[other] = self.corners[other] & !placement;
 
                 let z = zobrist::table();
                 for bit in placement.iter_bits() {
@@ -132,9 +146,13 @@ impl Board {
                 if prev_is_mono != new_is_mono {
                     self.zobrist ^= z.last_mono[p];
                 }
-
-                self.recompute_masks();
             }
+        }
+        let new_passes = self.consecutive_passes;
+        if prev_passes != new_passes {
+            let z = zobrist::table();
+            self.zobrist ^= z.pass_count[prev_passes as usize];
+            self.zobrist ^= z.pass_count[new_passes as usize];
         }
         self.zobrist ^= zobrist::table().side_to_move;
         self.side_to_move = 1 - self.side_to_move;
@@ -197,6 +215,7 @@ impl Board {
     }
 
     /// Validate that a placement by `player` is a legal non-pass move.
+    /// Uses the incrementally-maintained `forbidden` and `corners` masks.
     /// Doesn't check that `piece` is still in hand — caller must verify.
     pub fn placement_is_legal(&self, player: usize, piece: u8, placement: Bitboard) -> bool {
         if !(placement & !Bitboard::PLAYABLE).is_empty() {
@@ -212,6 +231,45 @@ impl Board {
             return false;
         }
         if placement.count_ones() != PIECE_SIZES[piece as usize] as u32 {
+            return false;
+        }
+        true
+    }
+
+    /// Like [`placement_is_legal`], but derives every check from raw
+    /// `own[p]` and `occupied` via neighbor shifts — does NOT consult the
+    /// incrementally-maintained `forbidden` or `corners` masks. Used by the
+    /// brute-force reference move generator so that perft remains a check on
+    /// the Blokus rules themselves (not just on "two mask-consumers agree").
+    pub fn placement_is_legal_mask_free(
+        &self,
+        player: usize,
+        piece: u8,
+        placement: Bitboard,
+    ) -> bool {
+        if !(placement & !Bitboard::PLAYABLE).is_empty() {
+            return false;
+        }
+        if placement.count_ones() != PIECE_SIZES[piece as usize] as u32 {
+            return false;
+        }
+        if !(placement & self.occupied).is_empty() {
+            return false;
+        }
+        let own = self.own[player];
+        // No orthogonal contact with own stones.
+        if !(placement & own.ortho_neighbors()).is_empty() {
+            return false;
+        }
+        // Must touch own corner (first move special-case: must include start cell).
+        if own.is_empty() {
+            let (sr, sc) = START_CELLS[player];
+            let mut start_bb = Bitboard::EMPTY;
+            start_bb.set_bit(bit_index(sr, sc));
+            if (placement & start_bb).is_empty() {
+                return false;
+            }
+        } else if (placement & own.diag_neighbors()).is_empty() {
             return false;
         }
         true

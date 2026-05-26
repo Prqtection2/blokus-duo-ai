@@ -11,3 +11,9 @@ requires-python = ">=3.10"
 [tool.maturin]
 manifest-path = "crates/blokus-py/Cargo.toml"
 module-name = "blokus"
+
+[tool.pytest.ini_options]
+testpaths = ["python/tests"]
+markers = ["slow: opt-in slow tests (full 200-game tournaments, deep perft, etc.)"]
+addopts = ["-m", "not slow"]
+filterwarnings = ["error::DeprecationWarning"]

@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Blokus Duo — G1</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <h1>Blokus Duo <span class="muted" id="engine-label"></span></h1>
+    <div class="controls">
+      <label>You play as:
+        <select id="human-side">
+          <option value="0">orange (first)</option>
+          <option value="1">purple (second)</option>
+        </select>
+      </label>
+      <button id="new-game">New game</button>
+      <button id="pass-btn" disabled>Pass</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="board-wrap">
+      <canvas id="board" width="560" height="560"></canvas>
+      <div class="hint" id="hint">
+        Click a piece in your tray. <b>R</b> rotate, <b>F</b> flip.
+        Click the board to place.
+      </div>
+    </section>
+
+    <aside class="side-panel">
+      <div class="scores">
+        <div class="score-card p0">
+          <div class="label">Orange (P0)</div>
+          <div class="value" id="score-0">0</div>
+          <div class="sub" id="squares-0">— squares left</div>
+        </div>
+        <div class="score-card p1">
+          <div class="label">Purple (P1)</div>
+          <div class="value" id="score-1">0</div>
+          <div class="sub" id="squares-1">— squares left</div>
+        </div>
+      </div>
+
+      <div class="status-row">
+        <span id="turn-label">Turn: —</span>
+        <span id="ply-label">Ply: 0</span>
+      </div>
+
+      <div class="engine-meta">
+        <div class="section-title">Engine move</div>
+        <div id="engine-meta-body" class="meta-body muted">— no move yet</div>
+      </div>
+
+      <div class="message-area">
+        <div class="section-title">Status</div>
+        <div id="message" class="muted">Connecting…</div>
+      </div>
+    </aside>
+  </main>
+
+  <section class="trays">
+    <div class="tray-block">
+      <h2>Orange tray (P0)</h2>
+      <div id="tray-0" class="tray"></div>
+    </div>
+    <div class="tray-block">
+      <h2>Purple tray (P1)</h2>
+      <div id="tray-1" class="tray"></div>
+    </div>
+  </section>
+
+  <script src="/static/main.js"></script>
+</body>
+</html>
