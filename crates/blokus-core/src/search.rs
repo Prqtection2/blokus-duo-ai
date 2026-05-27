@@ -97,6 +97,11 @@ pub struct SearchEngine {
     /// heuristic cutoffs and only returns at terminal (exact `final_score`).
     /// Set to 0 to disable entirely.
     endgame_threshold: u32,
+    /// Late-move reductions: search moves at index >= 3 (past TT-move +
+    /// killers) at depth-1 with a null window, then re-search at full depth
+    /// only if they improve alpha. Cuts nodes substantially at the cost of
+    /// being technically unsound — the AB=MM tests disable this flag.
+    lmr_enabled: bool,
 }
 
 impl SearchEngine {
@@ -120,7 +125,21 @@ impl SearchEngine {
             // fire in late games. At this engine's current strength the
             // benefit is small but the cost is invisible.
             endgame_threshold: 6,
+            lmr_enabled: true,
         }
+    }
+
+    pub fn lmr_enabled(&self) -> bool { self.lmr_enabled }
+
+    /// Toggle late-move reductions. With LMR off, alpha-beta returns the
+    /// exact min-max value (modulo TT) — needed by AB=MM tests.
+    pub fn set_lmr_enabled(&mut self, enabled: bool) {
+        if enabled != self.lmr_enabled {
+            // Reductions affect TT values; clearing avoids reading entries
+            // computed under a different reduction policy.
+            self.tt.clear();
+        }
+        self.lmr_enabled = enabled;
     }
 
     pub fn endgame_threshold(&self) -> u32 {
@@ -348,19 +367,53 @@ impl SearchEngine {
             let mv = buf[i];
             board.make_move(&mv);
 
-            // Principal-variation search: search the first move (assumed best
-            // by ordering) with the full window, subsequent moves with a null
-            // window. If a null-window search returns a value > alpha and
-            // strictly inside the window, re-search with the full window to
-            // get the exact value. Result value at root is preserved.
+            // PVS + LMR:
+            //  - Move 0 (the principal-variation candidate): full window,
+            //    full depth.
+            //  - Moves 1+: null-window search. With LMR, late moves (i >= 3)
+            //    at depth >= 3 get an additional depth reduction; if the
+            //    reduced result improves alpha we re-search at full depth
+            //    (still null window) and then full window inside (alpha, beta).
             let child_value: i32 = if i == 0 {
                 -self.negamax(board, next_depth, -beta, -alpha, rest).0
             } else {
-                let nw = -self.negamax(board, next_depth, -(alpha + 1), -alpha, rest).0;
-                if !self.aborted && nw > alpha && nw < beta {
-                    -self.negamax(board, next_depth, -beta, -alpha, rest).0
+                let do_lmr = self.lmr_enabled
+                    && i >= 3
+                    && depth >= 3
+                    && !matches!(mv, Move::Pass);
+                let reduction: u32 = if do_lmr { 1 } else { 0 };
+                let reduced_depth = next_depth.saturating_sub(reduction);
+
+                let v_reduced = -self
+                    .negamax(board, reduced_depth, -(alpha + 1), -alpha, rest)
+                    .0;
+
+                if self.aborted {
+                    board.unmake_move();
+                    return (alpha, best_move);
+                }
+
+                if v_reduced > alpha {
+                    // Promising — re-search at full depth (null window) if
+                    // we reduced, then full window if it lands in (alpha, beta).
+                    let v_full = if reduction > 0 {
+                        -self
+                            .negamax(board, next_depth, -(alpha + 1), -alpha, rest)
+                            .0
+                    } else {
+                        v_reduced
+                    };
+                    if self.aborted {
+                        board.unmake_move();
+                        return (alpha, best_move);
+                    }
+                    if v_full > alpha && v_full < beta {
+                        -self.negamax(board, next_depth, -beta, -alpha, rest).0
+                    } else {
+                        v_full
+                    }
                 } else {
-                    nw
+                    v_reduced
                 }
             };
 

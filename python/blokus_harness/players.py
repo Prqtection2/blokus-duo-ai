@@ -48,6 +48,99 @@ class GreedyPlayer:
         return self.rng.choice(best)
 
 
+class CenterPressurePlayer:
+    """Greedy with central tiebreak — among same-size moves, prefer those whose
+    centroid is closest to the board center (6.5, 6.5).
+
+    Approximates a competent human who fights for the middle, which is the
+    style that walled off the engine in the user's game. Used in diagnostics
+    and in the future tuning pool so candidates can't win by huddling."""
+
+    name = "center-pressure"
+
+    def __init__(self, rng: random.Random | None = None):
+        self.rng = rng if rng is not None else random.Random()
+
+    def select_move(self, board, moves):
+        max_size = max(m.size for m in moves)
+        biggest = [m for m in moves if m.size == max_size]
+        if len(biggest) == 1:
+            return biggest[0]
+
+        def dist_to_center_sq(m):
+            cells = m.cells()
+            cy = sum(c[0] for c in cells) / len(cells)
+            cx = sum(c[1] for c in cells) / len(cells)
+            return (cy - 6.5) ** 2 + (cx - 6.5) ** 2
+
+        biggest.sort(key=dist_to_center_sq)
+        # Among the moves tied for the most central centroid, random tiebreak.
+        best_dist = dist_to_center_sq(biggest[0])
+        tied = [m for m in biggest if dist_to_center_sq(m) == best_dist]
+        return self.rng.choice(tied)
+
+
+class BlockerPlayer:
+    """Greedy WITH adversarial intent: for each candidate move, applies it,
+    counts the opponent's available corners after the move, and picks the move
+    that minimizes that count. Ties broken by maximizing own piece size, then
+    by centrality.
+
+    Approximates a stronger human strategy — actively wall the engine off
+    rather than just claiming central cells. Used in diagnostics so we have
+    a reproducible opponent that actually punishes positional weakness."""
+
+    name = "blocker"
+
+    def __init__(self, rng: random.Random | None = None):
+        self.rng = rng if rng is not None else random.Random()
+
+    @staticmethod
+    def _opp_corner_count(board) -> int:
+        """Count the opponent's corners (diag-of-own minus ortho-of-own minus
+        occupied). board.side_to_move now refers to *whichever* side moves
+        next — we count for that side, which is the opponent of whoever
+        just played."""
+        opp = board.side_to_move
+        own_opp = [tuple(c) for c in board.cells_of(opp)]
+        if not own_opp:
+            return 1  # first-move special case: corners = {start_cell}
+        own_self = [tuple(c) for c in board.cells_of(1 - opp)]
+        occupied = set(own_opp) | set(own_self)
+        diag, ortho = set(), set()
+        for r, c in own_opp:
+            for dr, dc in ((-1, -1), (-1, 1), (1, -1), (1, 1)):
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < 14 and 0 <= nc < 14:
+                    diag.add((nr, nc))
+            for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < 14 and 0 <= nc < 14:
+                    ortho.add((nr, nc))
+        return len(diag - ortho - occupied)
+
+    def select_move(self, board, moves):
+        center = (6.5, 6.5)
+        best_score = None
+        best_moves: list = []
+        for m in moves:
+            board.make_move(m)
+            opp_corners = self._opp_corner_count(board)
+            board.unmake_move()
+            # Score: lower opp_corners is better. Tiebreak: bigger piece, then central.
+            cells = m.cells()
+            cy = sum(c[0] for c in cells) / len(cells)
+            cx = sum(c[1] for c in cells) / len(cells)
+            dist_sq = (cy - center[0]) ** 2 + (cx - center[1]) ** 2
+            score = (opp_corners, -int(m.size), dist_sq)
+            if best_score is None or score < best_score:
+                best_score = score
+                best_moves = [m]
+            elif score == best_score:
+                best_moves.append(m)
+        return self.rng.choice(best_moves)
+
+
 class EnginePlayer:
     """Search engine wrapped as a Player.
 

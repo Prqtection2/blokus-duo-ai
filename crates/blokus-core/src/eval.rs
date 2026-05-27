@@ -87,9 +87,35 @@ pub fn heuristic_with(board: &Board, w: &EvalWeights) -> i32 {
     let (other_placed, other_liability) = placed_and_liability(board, other);
 
     let placed_diff = stm_placed - other_placed;
-    let corner_diff = board.corners[stm].count_ones() as i32
-        - board.corners[other].count_ones() as i32;
+    // "corner_count" — but only LIVE corners (those with at least one
+    // orthogonally-adjacent cell that's open for extension). A corner
+    // walled in by own stones can't grow a multi-cell piece from it, so
+    // it shouldn't count toward expansion potential. This is what
+    // distinguishes a useful corner (pointing into open space) from a
+    // dead one (surrounded by own territory) — the PM-diagnosed fix for
+    // the engine filling in its own area.
+    let corner_diff = {
+        let stm_extendable =
+            !board.occupied & !board.forbidden[stm] & Bitboard::PLAYABLE;
+        let other_extendable =
+            !board.occupied & !board.forbidden[other] & Bitboard::PLAYABLE;
+        let stm_live = board.corners[stm] & stm_extendable.ortho_neighbors();
+        let other_live = board.corners[other] & other_extendable.ortho_neighbors();
+        stm_live.count_ones() as i32 - other_live.count_ones() as i32
+    };
 
+    // "Territory" is misleading as a name — see Phase 7 tuning notes. What
+    // mine.count_ones() actually counts is the size of the 1-step influence
+    // halo around own stones, minus any portion overlapping opponent's halo.
+    // That halo partitions into:
+    //   - cells diagonally adjacent to own (= corners — already in corner_count),
+    //   - cells orthogonally adjacent to own (forbidden for me; edge-touch),
+    //   - cells in both (also forbidden).
+    // The non-corner part scales with diffusion: spread-out stones maximize
+    // halo size, compact stones minimize it (heavy 3x3-neighborhood overlap).
+    // In Blokus, compact placement is the correct strategy, so this feature
+    // is most useful with a *negative* weight (current champion: -40), where
+    // it functions as a diffusion penalty complementing corner_count.
     let territory_diff = if w.territory != 0 {
         let me_reach = one_step_influence(board.own[stm]);
         let opp_reach = one_step_influence(board.own[other]);

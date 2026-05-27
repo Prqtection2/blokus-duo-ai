@@ -140,6 +140,9 @@ fn alpha_beta_equals_minimax_depth_1_2_from_start() {
 #[test]
 fn alpha_beta_equals_minimax_depth_3_from_constrained_position() {
     // Walk a few plies to shrink branching, then compare AB and MM at depth 3.
+    // LMR is technically unsound (can miss late-move improvements), so this
+    // value-exactness test disables it. PVS preserves root value via re-search
+    // and stays on.
     let mut board = Board::new();
     let mut e_warm = SearchEngine::new(16);
     for _ in 0..6 {
@@ -154,6 +157,7 @@ fn alpha_beta_equals_minimax_depth_3_from_constrained_position() {
     }
     let mut ab_engine = SearchEngine::new(16);
     ab_engine.set_tt_enabled(false);
+    ab_engine.set_lmr_enabled(false);
     let mut ab_board = board.clone();
     let mut mm_board = board.clone();
     let ab = ab_engine.search_fixed_depth(&mut ab_board, 3);
@@ -163,7 +167,7 @@ fn alpha_beta_equals_minimax_depth_3_from_constrained_position() {
         ab.value, ab.nodes, mm_val, mm_nodes
     );
     assert_eq!(ab.value, mm_val);
-    assert!(ab.nodes <= mm_nodes, "alpha-beta should visit ≤ minimax nodes");
+    assert!(ab.nodes <= mm_nodes, "alpha-beta should visit <= minimax nodes");
 }
 
 // ---------- Nodes/sec readout (release mode preferred) ----------

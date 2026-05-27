@@ -44,9 +44,30 @@ class LastMove:
 
 
 def _default_engine_factory() -> object:
-    # Phase 3 default: the real search engine. Override via configure_session
-    # if you want a baseline (e.g., GreedyPlayer) for comparison.
-    return EnginePlayer(time_budget_ms=300, max_depth=16)
+    # 1000ms per move: budget sweep showed 200ms -> 1000ms is worth ~250 elo,
+    # while 1000ms -> 5000ms gains nothing measurable. Override via
+    # configure_session if you want a baseline for comparison.
+    #
+    # We override the Phase-7-tuned champion's `territory = -40` to 0 here.
+    # The -40 weight was a real SPRT-validated improvement in self-play, but
+    # it overfit to the Phase 4 hand-set baseline: it codes for "play
+    # compactly, don't expand your halo," which against humans translates to
+    # passive corner-hugging that gets choked off easily (the diagnostic
+    # confirmed this — see feedback_phase7_territory_finding). For human
+    # play, neutralizing the feature gives more engaging, forward play.
+    # A real fix (a proper forward-mobility feature + gauntlet pool that
+    # includes an aggressive blocker) is the next eval-iteration task.
+    human_play_weights = {
+        "placed_squares": 100,
+        "corner_count": 80,
+        "territory": 0,
+        "piece_liability": -10,
+    }
+    return EnginePlayer(
+        time_budget_ms=1000,
+        weights=human_play_weights,
+        max_depth=16,
+    )
 
 
 class GameSession:
@@ -121,14 +142,16 @@ class GameSession:
                 cells=[list(c) for c in mv.cells()],
             )
             # If the player exposes a richer SearchResult (EnginePlayer),
-            # report its depth/nodes/time. Otherwise fall back to placeholders.
+            # report its depth/nodes. Use WALL time, not sr.time_ms — the
+            # latter records "elapsed at the last completed iteration" so
+            # it badly under-reports when depth N+1 aborts mid-search.
             sr = getattr(self.engine, "last_result", None)
             if sr is not None:
                 self.last_engine_meta = EngineMeta(
                     eval=float(sr.value),
                     depth=int(sr.depth),
                     nodes=int(sr.nodes),
-                    time_ms=float(sr.time_ms),
+                    time_ms=wall_ms,
                     move_repr=repr(mv),
                 )
             else:
