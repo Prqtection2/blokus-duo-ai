@@ -1,0 +1,238 @@
+{
+  "ply": 8,
+  "side_to_move": 0,
+  "human_side": 0,
+  "engine_weights": {
+    "placed_squares": 100,
+    "corner_count": 80,
+    "territory": 60,
+    "piece_liability": -10
+  },
+  "engine_time_budget_ms": 3000,
+  "history": [
+    {
+      "by": 0,
+      "passed": false,
+      "piece_id": 9,
+      "cells": [
+        [
+          4,
+          4
+        ],
+        [
+          5,
+          4
+        ],
+        [
+          5,
+          5
+        ],
+        [
+          5,
+          6
+        ],
+        [
+          6,
+          5
+        ]
+      ]
+    },
+    {
+      "by": 1,
+      "passed": false,
+      "piece_id": 17,
+      "cells": [
+        [
+          7,
+          7
+        ],
+        [
+          7,
+          8
+        ],
+        [
+          8,
+          8
+        ],
+        [
+          8,
+          9
+        ],
+        [
+          9,
+          9
+        ]
+      ]
+    },
+    {
+      "by": 0,
+      "passed": false,
+      "piece_id": 18,
+      "cells": [
+        [
+          7,
+          6
+        ],
+        [
+          8,
+          5
+        ],
+        [
+          8,
+          6
+        ],
+        [
+          8,
+          7
+        ],
+        [
+          9,
+          6
+        ]
+      ]
+    },
+    {
+      "by": 1,
+      "passed": false,
+      "piece_id": 11,
+      "cells": [
+        [
+          9,
+          7
+        ],
+        [
+          10,
+          4
+        ],
+        [
+          10,
+          5
+        ],
+        [
+          10,
+          6
+        ],
+        [
+          10,
+          7
+        ]
+      ]
+    },
+    {
+      "by": 0,
+      "passed": false,
+      "piece_id": 19,
+      "cells": [
+        [
+          5,
+          9
+        ],
+        [
+          6,
+          7
+        ],
+        [
+          6,
+          8
+        ],
+        [
+          6,
+          9
+        ],
+        [
+          6,
+          10
+        ]
+      ]
+    },
+    {
+      "by": 1,
+      "passed": false,
+      "piece_id": 12,
+      "cells": [
+        [
+          6,
+          11
+        ],
+        [
+          6,
+          12
+        ],
+        [
+          6,
+          13
+        ],
+        [
+          7,
+          10
+        ],
+        [
+          7,
+          11
+        ]
+      ]
+    },
+    {
+      "by": 0,
+      "passed": false,
+      "piece_id": 11,
+      "cells": [
+        [
+          3,
+          13
+        ],
+        [
+          4,
+          10
+        ],
+        [
+          4,
+          11
+        ],
+        [
+          4,
+          12
+        ],
+        [
+          4,
+          13
+        ]
+      ]
+    },
+    {
+      "by": 1,
+      "passed": false,
+      "piece_id": 9,
+      "cells": [
+        [
+          11,
+          8
+        ],
+        [
+          12,
+          6
+        ],
+        [
+          12,
+          7
+        ],
+        [
+          12,
+          8
+        ],
+        [
+          13,
+          7
+        ]
+      ]
+    }
+  ],
+  "last_engine_meta": {
+    "eval": 120.0,
+    "depth": 3,
+    "nodes": 8828,
+    "time_ms": 3099.72,
+    "move_repr": "Move(piece=F, cells=[(11, 8), (12, 6), (12, 7), (12, 8), (13, 7)])",
+    "passed": false
+  }
+}

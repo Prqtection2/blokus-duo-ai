@@ -39,13 +39,14 @@ def test_engine_does_not_get_walled_by_blocker_seed_42():
     Pre-LMR baseline (before the fix landed): engine passed at ply 22, lost
     P1=-44 vs P0=-36 (deficit -8). The test gates against forced passes and
     a deficit worse than the pre-fix baseline."""
-    # Match the GUI's engine config: 1000ms budget + the post-Phase-7-debug
-    # eval weights (territory=0; the GUI's _default_engine_factory overrides
-    # EnginePlayer's CHAMPION_WEIGHTS for human play).
+    # Match the GUI's engine config: 1000ms budget + the contested-reach
+    # eval weights (territory=+60). After the 2026-05-27 territory redesign,
+    # the feature now scores contested cells (BFS-based) instead of the
+    # halo metric. +60 weight pulls the engine toward the contested middle.
     human_play_weights = {
         "placed_squares": 100,
         "corner_count": 80,
-        "territory": 0,
+        "territory": 60,
         "piece_liability": -10,
     }
     rng = random.Random(42)

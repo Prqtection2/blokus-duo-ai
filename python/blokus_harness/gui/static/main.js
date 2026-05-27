@@ -12,6 +12,8 @@ const els = {
   newGame: document.getElementById("new-game"),
   humanSide: document.getElementById("human-side"),
   pass: document.getElementById("pass-btn"),
+  dumpPos: document.getElementById("dump-pos-btn"),
+  heatmap: document.getElementById("show-heatmap"),
   message: document.getElementById("message"),
   engineMeta: document.getElementById("engine-meta-body"),
   engineLabel: document.getElementById("engine-label"),
@@ -106,12 +108,55 @@ function drawStartMarkers(startCells) {
     ctx.fill();
   }
 }
+// Heatmap colors for the piece-coverage partition. Stones (codes 0/1) draw
+// at full color separately; this table is for empty cells only.
+//
+// New semantics (2026-05-27, after the eval rewrite to piece-aware territory):
+//   2 SAFE_P0  -> only P0 has a legal placement covering this cell (strong
+//                 single-player claim). Vibrant orange.
+//   3 SAFE_P1  -> only P1 has a legal placement covering this cell. Vibrant
+//                 purple.
+//   6 TIED     -> both players can legally cover -- whoever moves first wins
+//                 it. Neutral gray.
+//   7 UNREACHABLE -> neither can cover this turn. No fill.
+// Codes 4/5 are no longer produced by the partition (kept for visual safety
+// in case an older snapshot is loaded).
+const HEATMAP_FILL = {
+  2: "rgba(255, 106, 0, 0.50)",
+  3: "rgba(124, 58, 237, 0.50)",
+  4: "rgba(255, 106, 0, 0.50)",
+  5: "rgba(124, 58, 237, 0.50)",
+  6: "rgba(160, 160, 160, 0.45)",
+  7: null,
+};
+
+function drawHeatmap() {
+  const partition = currentState && currentState.partition;
+  if (!partition || partition.length !== 14 * 14) return;
+  for (let r = 0; r < BOARD_SIZE; r++) {
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      const code = partition[r * BOARD_SIZE + c];
+      // Codes 0/1 are stones — drawn at full color in a later pass.
+      if (code === 0 || code === 1) continue;
+      const fill = HEATMAP_FILL[code];
+      if (!fill) continue;
+      ctx.fillStyle = fill;
+      ctx.fillRect(c * CELL + 1, r * CELL + 1, CELL - 2, CELL - 2);
+    }
+  }
+}
+
 function drawBoard() {
   clearBoard();
   drawGrid();
   if (!currentState) return;
 
   drawStartMarkers(staticMeta?.start_cells || [[4, 4], [9, 9]]);
+
+  // Optional territory heatmap (drawn UNDER the stones).
+  if (els.heatmap && els.heatmap.checked) {
+    drawHeatmap();
+  }
 
   // Player stones.
   for (let p = 0; p < 2; p++) {
@@ -301,6 +346,14 @@ els.newGame.addEventListener("click", () => {
 els.pass.addEventListener("click", () => {
   ws.send(JSON.stringify({ type: "pass" }));
 });
+if (els.dumpPos) {
+  els.dumpPos.addEventListener("click", () => {
+    ws.send(JSON.stringify({ type: "dump_position" }));
+  });
+}
+if (els.heatmap) {
+  els.heatmap.addEventListener("change", () => drawBoard());
+}
 
 function flashMessage(msg, isError = false) {
   els.message.textContent = msg;
@@ -384,6 +437,7 @@ function onMessage(ev) {
   else if (msg.type === "state") onState(msg);
   else if (msg.type === "rejected") flashMessage(`Rejected: ${msg.reason}`, true);
   else if (msg.type === "error") flashMessage(`Error: ${msg.message}`, true);
+  else if (msg.type === "info") flashMessage(msg.message, false);
 }
 
 function connect() {

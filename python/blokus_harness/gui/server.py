@@ -8,9 +8,11 @@ broadcasts state changes to all connected clients.
 from __future__ import annotations
 
 import asyncio
+import json
 import random
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
@@ -22,6 +24,7 @@ import blokus
 from blokus_harness import EnginePlayer, GreedyPlayer
 
 STATIC_DIR = Path(__file__).parent / "static"
+DUMP_DIR = Path(__file__).resolve().parents[3] / "python" / "diagnostics" / "positions"
 HUMAN_DEFAULT_SIDE = 0
 
 
@@ -44,27 +47,19 @@ class LastMove:
 
 
 def _default_engine_factory() -> object:
-    # 1000ms per move: budget sweep showed 200ms -> 1000ms is worth ~250 elo,
-    # while 1000ms -> 5000ms gains nothing measurable. Override via
-    # configure_session if you want a baseline for comparison.
-    #
-    # We override the Phase-7-tuned champion's `territory = -40` to 0 here.
-    # The -40 weight was a real SPRT-validated improvement in self-play, but
-    # it overfit to the Phase 4 hand-set baseline: it codes for "play
-    # compactly, don't expand your halo," which against humans translates to
-    # passive corner-hugging that gets choked off easily (the diagnostic
-    # confirmed this — see feedback_phase7_territory_finding). For human
-    # play, neutralizing the feature gives more engaging, forward play.
-    # A real fix (a proper forward-mobility feature + gauntlet pool that
-    # includes an aggressive blocker) is the next eval-iteration task.
+    # 3000ms per move (2026-05-27): opening has ~380 legal moves; at 1000ms
+    # we could only complete depth 3 in the opening. Bumping the budget lets
+    # depth 4+ reach the opening, which is where most strategic mistakes were
+    # showing up in human play. Mid/late game already converges to depth 7-16
+    # well under any reasonable budget, so the cost is paid only when needed.
     human_play_weights = {
         "placed_squares": 100,
         "corner_count": 80,
-        "territory": 0,
+        "territory": 60,
         "piece_liability": -10,
     }
     return EnginePlayer(
-        time_budget_ms=1000,
+        time_budget_ms=10000,
         weights=human_play_weights,
         max_depth=16,
     )
@@ -84,6 +79,7 @@ class GameSession:
         self.engine = engine_factory()
         self.last_move: LastMove | None = None
         self.last_engine_meta: EngineMeta | None = None
+        self.history: list[dict[str, Any]] = []
 
     def new_game(self, *, human_side: int) -> None:
         self.board = blokus.Board()
@@ -91,6 +87,7 @@ class GameSession:
         self.engine = self.engine_factory()
         self.last_move = None
         self.last_engine_meta = None
+        self.history = []
 
     def _find_legal_match(self, piece_id: int, cells: list[list[int]]):
         target = frozenset((int(r), int(c)) for r, c in cells)
@@ -115,6 +112,12 @@ class GameSession:
             piece_id=piece_id,
             cells=[list(c) for c in cells],
         )
+        self.history.append({
+            "by": self.human_side,
+            "passed": False,
+            "piece_id": piece_id,
+            "cells": [list(c) for c in cells],
+        })
         return True, None
 
     def human_pass(self) -> tuple[bool, str | None]:
@@ -126,6 +129,12 @@ class GameSession:
             return False, "cannot pass while legal moves are available"
         self.board.make_pass()
         self.last_move = LastMove(by=self.human_side, passed=True)
+        self.history.append({
+            "by": self.human_side,
+            "passed": True,
+            "piece_id": None,
+            "cells": [],
+        })
         return True, None
 
     def _step_engine(self) -> None:
@@ -141,6 +150,12 @@ class GameSession:
                 piece_id=int(mv.piece_id),
                 cells=[list(c) for c in mv.cells()],
             )
+            self.history.append({
+                "by": 1 - self.human_side,
+                "passed": False,
+                "piece_id": int(mv.piece_id),
+                "cells": [list(c) for c in mv.cells()],
+            })
             # If the player exposes a richer SearchResult (EnginePlayer),
             # report its depth/nodes. Use WALL time, not sr.time_ms — the
             # latter records "elapsed at the last completed iteration" so
@@ -166,6 +181,12 @@ class GameSession:
             self.board.make_pass()
             wall_ms = round((time.perf_counter() - t0) * 1000.0, 2)
             self.last_move = LastMove(by=1 - self.human_side, passed=True)
+            self.history.append({
+                "by": 1 - self.human_side,
+                "passed": True,
+                "piece_id": None,
+                "cells": [],
+            })
             self.last_engine_meta = EngineMeta(
                 eval=0.0,
                 depth=0,
@@ -174,6 +195,47 @@ class GameSession:
                 move_repr="pass",
                 passed=True,
             )
+
+    def dump_position(self) -> Path:
+        """Write a JSON snapshot of the current position (move history + engine
+        meta + weights) so a diagnostic can replay it. Returns the path written.
+        """
+        DUMP_DIR.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = DUMP_DIR / f"pos_ply{int(self.board.ply):03d}_{ts}.json"
+        engine = self.engine
+        time_budget = getattr(engine, "time_budget_ms", None)
+        weights_tuple = engine.engine.weights() if hasattr(engine, "engine") else None
+        weights = None
+        if weights_tuple is not None:
+            weights = {
+                "placed_squares": weights_tuple[0],
+                "corner_count": weights_tuple[1],
+                "territory": weights_tuple[2],
+                "piece_liability": weights_tuple[3],
+            }
+        snapshot = {
+            "ply": int(self.board.ply),
+            "side_to_move": int(self.board.side_to_move),
+            "human_side": int(self.human_side),
+            "engine_weights": weights,
+            "engine_time_budget_ms": time_budget,
+            "history": list(self.history),
+            "last_engine_meta": (
+                {
+                    "eval": self.last_engine_meta.eval,
+                    "depth": self.last_engine_meta.depth,
+                    "nodes": self.last_engine_meta.nodes,
+                    "time_ms": self.last_engine_meta.time_ms,
+                    "move_repr": self.last_engine_meta.move_repr,
+                    "passed": self.last_engine_meta.passed,
+                }
+                if self.last_engine_meta
+                else None
+            ),
+        }
+        path.write_text(json.dumps(snapshot, indent=2))
+        return path
 
     def play_engine_until_humans_turn(self) -> None:
         """Run engine plies until it's the human's turn or the game ends."""
@@ -221,6 +283,7 @@ class GameSession:
                 if self.last_move
                 else None
             ),
+            "partition": list(blokus.contested_partition(board)),
             "engine_meta": (
                 {
                     "eval": self.last_engine_meta.eval,
@@ -339,5 +402,11 @@ async def _handle_message(message: dict[str, Any]) -> None:
             await _broadcast(session.serialize())
         elif kind == "request_state":
             await _broadcast(session.serialize())
+        elif kind == "dump_position":
+            path = session.dump_position()
+            await _broadcast({
+                "type": "info",
+                "message": f"Position saved: {path.name}",
+            })
         else:
             await _broadcast({"type": "rejected", "reason": f"unknown message {kind!r}"})

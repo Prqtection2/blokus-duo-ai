@@ -158,12 +158,19 @@ class EnginePlayer:
 
     name = "engine"
 
-    # Tuned champion (Phase 7 v20260525_222926). Beats Phase 4 hand-set
-    # weights 66W/12L/0D = 84.6% over 78 games (SPRT-accepted, LLR +2.98).
+    # Post-Phase-7 weights after the territory feature was redesigned
+    # (2026-05-27) from a halo measure to a contested-reach measure. The
+    # Phase 7 SPRT-tuned `territory = -40` was bound to the OLD halo formula
+    # and is invalid under the new feature — it would reward giving the
+    # opponent contested cells. Starting fresh: +60 territory, comparable
+    # to corner_count's 80. Will re-tune against a varied opponent pool.
+    # The original Phase 7 champion JSON is preserved at
+    # champions/v20260525_222926.json for history; it's no longer the
+    # in-use baseline.
     CHAMPION_WEIGHTS: dict = {
         "placed_squares": 100,
         "corner_count": 80,
-        "territory": -40,
+        "territory": 60,
         "piece_liability": -10,
     }
 

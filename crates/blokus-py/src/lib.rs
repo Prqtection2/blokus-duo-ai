@@ -218,6 +218,30 @@ fn start_cells() -> Vec<(usize, usize)> {
     core_board::START_CELLS.to_vec()
 }
 
+/// Contested-territory partition for the given board, as a flat 196-byte list
+/// in row-major order. Each byte is a class code:
+///   0 = P0 stone, 1 = P1 stone,
+///   2 = SAFE_P0 (only P0 has a legal placement covering this cell),
+///   3 = SAFE_P1 (only P1 has a legal placement covering this cell),
+///   6 = TIED (both players can cover this cell — race),
+///   7 = UNREACHABLE (neither can cover this turn).
+/// Codes 4/5 are reserved for older metrics and no longer produced.
+/// Used by the GUI heatmap; not in the search hot path.
+#[pyfunction]
+fn contested_partition(board: &PyBoard) -> Vec<u8> {
+    core_eval::contested_partition(&board.0)
+}
+
+/// Cells covered by *any* legal placement for `player` (0 or 1), as a list
+/// of (row, col) tuples on the 14x14 playable grid.
+#[pyfunction]
+fn coverable_cells(board: &PyBoard, player: usize) -> Vec<(usize, usize)> {
+    movegen::coverable_cells(&board.0, player)
+        .iter_bits()
+        .map(bitboard::from_bit_index)
+        .collect()
+}
+
 #[pyclass(name = "SearchResult")]
 #[derive(Clone)]
 struct PySearchResult {
@@ -400,6 +424,8 @@ fn blokus(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(piece_names, m)?)?;
     m.add_function(wrap_pyfunction!(start_cells, m)?)?;
     m.add_function(wrap_pyfunction!(piece_base_shapes, m)?)?;
+    m.add_function(wrap_pyfunction!(contested_partition, m)?)?;
+    m.add_function(wrap_pyfunction!(coverable_cells, m)?)?;
     m.add_class::<PyMove>()?;
     m.add_class::<PyBoard>()?;
     m.add_class::<PySearchResult>()?;

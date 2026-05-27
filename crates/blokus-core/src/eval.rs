@@ -8,6 +8,7 @@
 
 use crate::bitboard::Bitboard;
 use crate::board::Board;
+use crate::movegen::coverable_cells;
 use crate::pieces::{NUM_FREE_PIECES, PIECE_SIZES};
 
 /// Sum of all 21 piece sizes (1+2+2*3+5*4+12*5).
@@ -70,10 +71,85 @@ fn placed_and_liability(board: &Board, p: usize) -> (i32, i32) {
     (placed, liability)
 }
 
-/// Bitboard of cells within one Chebyshev step (orthogonal or diagonal) of `own`.
+/// Live corners for player `p`: corners with at least one orthogonally
+/// adjacent extension-eligible cell. Used by the corner-count term.
 #[inline]
-fn one_step_influence(own: Bitboard) -> Bitboard {
-    own | own.ortho_neighbors() | own.diag_neighbors()
+fn live_corners(board: &Board, p: usize) -> Bitboard {
+    let extendable = !board.occupied & !board.forbidden[p] & Bitboard::PLAYABLE;
+    board.corners[p] & extendable.ortho_neighbors()
+}
+
+/// Cell classification codes returned by [`contested_partition`].
+///
+/// New (2026-05-27) semantics — piece-coverage-based, not BFS distance:
+///   * SAFE_P0/SAFE_P1: only that player has a legal placement covering the
+///     cell this turn. They own it (this turn) by exclusion.
+///   * TIED: both players have legal placements covering the cell. It's a
+///     race; whoever moves first wins it.
+///   * UNREACHABLE: neither player can cover the cell this turn.
+/// CONTESTED_P0/CONTESTED_P1 are no longer produced — kept for code-stability
+/// of the visualization color table.
+pub mod partition {
+    pub const OWN_P0: u8 = 0;
+    pub const OWN_P1: u8 = 1;
+    pub const SAFE_P0: u8 = 2;
+    pub const SAFE_P1: u8 = 3;
+    pub const CONTESTED_P0: u8 = 4;
+    pub const CONTESTED_P1: u8 = 5;
+    pub const TIED: u8 = 6;
+    pub const UNREACHABLE: u8 = 7;
+}
+
+/// Classify every 14x14 cell for visualization. Returns 196 bytes in
+/// row-major order; see the [`partition`] submodule for the code legend.
+///
+/// Uses the same coverable-cells sets as [`piece_aware_territory_diff`] so
+/// the heatmap matches what the eval actually scores.
+pub fn contested_partition(board: &Board) -> Vec<u8> {
+    let cov_p0 = coverable_cells(board, 0);
+    let cov_p1 = coverable_cells(board, 1);
+    let mut out = vec![partition::UNREACHABLE; 196];
+    for r in 0..14usize {
+        for c in 0..14usize {
+            let idx = r * 14 + c;
+            let bit_idx = r * 16 + c;
+            if board.own[0].get_bit(bit_idx) {
+                out[idx] = partition::OWN_P0;
+            } else if board.own[1].get_bit(bit_idx) {
+                out[idx] = partition::OWN_P1;
+            } else {
+                let p0 = cov_p0.get_bit(bit_idx);
+                let p1 = cov_p1.get_bit(bit_idx);
+                out[idx] = match (p0, p1) {
+                    (true, false) => partition::SAFE_P0,
+                    (false, true) => partition::SAFE_P1,
+                    (true, true) => partition::TIED,
+                    (false, false) => partition::UNREACHABLE,
+                };
+            }
+        }
+    }
+    out
+}
+
+/// Piece-aware territory: counts cells *only one player can legally cover*
+/// this turn, scored as (mine-exclusive − theirs-exclusive) from stm view.
+///
+/// Replaces the BFS-distance "contested-reach" metric (2026-05-27): king-move
+/// BFS over-claimed distant cells with no piece commitment. Using actual
+/// movegen coverage closes that gap — a cell counts toward "yours" only if
+/// you have a piece + orientation + anchor that lands on it AND the opponent
+/// does not. Cells coverable by both are TIED (race), contributing 0.
+fn piece_aware_territory_diff(board: &Board) -> i32 {
+    let cov_p0 = coverable_cells(board, 0);
+    let cov_p1 = coverable_cells(board, 1);
+    let only_p0 = (cov_p0 & !cov_p1).count_ones() as i32;
+    let only_p1 = (cov_p1 & !cov_p0).count_ones() as i32;
+    if board.side_to_move == 0 {
+        only_p0 - only_p1
+    } else {
+        only_p1 - only_p0
+    }
 }
 
 /// Evaluation from side-to-move's perspective using the given weights.
@@ -87,42 +163,23 @@ pub fn heuristic_with(board: &Board, w: &EvalWeights) -> i32 {
     let (other_placed, other_liability) = placed_and_liability(board, other);
 
     let placed_diff = stm_placed - other_placed;
-    // "corner_count" — but only LIVE corners (those with at least one
-    // orthogonally-adjacent cell that's open for extension). A corner
-    // walled in by own stones can't grow a multi-cell piece from it, so
-    // it shouldn't count toward expansion potential. This is what
-    // distinguishes a useful corner (pointing into open space) from a
-    // dead one (surrounded by own territory) — the PM-diagnosed fix for
-    // the engine filling in its own area.
+    // "corner_count" counts LIVE corners only (those with at least one
+    // orthogonally-adjacent extension-eligible cell). A corner walled in by
+    // own stones can't grow a multi-cell piece from it, so it doesn't count.
     let corner_diff = {
-        let stm_extendable =
-            !board.occupied & !board.forbidden[stm] & Bitboard::PLAYABLE;
-        let other_extendable =
-            !board.occupied & !board.forbidden[other] & Bitboard::PLAYABLE;
-        let stm_live = board.corners[stm] & stm_extendable.ortho_neighbors();
-        let other_live = board.corners[other] & other_extendable.ortho_neighbors();
+        let stm_live = live_corners(board, stm);
+        let other_live = live_corners(board, other);
         stm_live.count_ones() as i32 - other_live.count_ones() as i32
     };
 
-    // "Territory" is misleading as a name — see Phase 7 tuning notes. What
-    // mine.count_ones() actually counts is the size of the 1-step influence
-    // halo around own stones, minus any portion overlapping opponent's halo.
-    // That halo partitions into:
-    //   - cells diagonally adjacent to own (= corners — already in corner_count),
-    //   - cells orthogonally adjacent to own (forbidden for me; edge-touch),
-    //   - cells in both (also forbidden).
-    // The non-corner part scales with diffusion: spread-out stones maximize
-    // halo size, compact stones minimize it (heavy 3x3-neighborhood overlap).
-    // In Blokus, compact placement is the correct strategy, so this feature
-    // is most useful with a *negative* weight (current champion: -40), where
-    // it functions as a diffusion penalty complementing corner_count.
+    // "territory" was redesigned a SECOND time (2026-05-27) — now piece-
+    // coverage-based, not BFS distance. See `piece_aware_territory_diff` doc.
+    // A cell counts iff a legal placement covers it. Diagnostic at ply 8
+    // showed the prior BFS metric over-claimed distant cells (35 contested
+    // for engine, 8 for opp) that the engine had no piece committed to,
+    // collapsing from +1300 static to +120 after one opponent reply.
     let territory_diff = if w.territory != 0 {
-        let me_reach = one_step_influence(board.own[stm]);
-        let opp_reach = one_step_influence(board.own[other]);
-        let empty = !board.occupied & Bitboard::PLAYABLE;
-        let mine = me_reach & !opp_reach & empty;
-        let theirs = opp_reach & !me_reach & empty;
-        mine.count_ones() as i32 - theirs.count_ones() as i32
+        piece_aware_territory_diff(board)
     } else {
         0
     };

@@ -58,7 +58,9 @@ TUNED_WEIGHTS = {
 NEUTRAL_WEIGHTS = {
     "placed_squares": 100,
     "corner_count": 80,
-    "territory": 0,
+    # The territory feature is contested-reach (BFS-based, 2026-05-27).
+    # GUI default = +20 after observing +60 dominated and destabilized play.
+    "territory": 60,
     "piece_liability": -10,
 }
 

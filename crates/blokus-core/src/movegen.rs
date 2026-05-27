@@ -63,6 +63,52 @@ pub fn generate_moves_into(board: &Board, moves: &mut Vec<Move>) {
     }
 }
 
+/// Bitboard of cells covered by *any* legal placement for `player`.
+///
+/// Mirrors [`generate_moves_into`] but unions placement bitboards instead of
+/// building a `Vec<Move>` — the eval needs the cell-set, not the moves
+/// themselves. Used by the piece-aware territory feature: a cell is
+/// "coverable by p" iff p has at least one legal placement that lands on it.
+/// `placement_is_legal` checks are skipped for placements already OR'd in;
+/// since OR is idempotent we use a small dedup set keyed on the placement
+/// bitboard to avoid re-validating the same shape from multiple anchors.
+pub fn coverable_cells(board: &Board, player: usize) -> Bitboard {
+    let mut result = Bitboard::EMPTY;
+    let pieces = oriented_pieces();
+    let pre = precomputed_placements();
+    let mut seen: HashSet<(u8, Bitboard)> = HashSet::new();
+
+    for anchor_idx in board.corners[player].iter_bits() {
+        let anchor_row = anchor_idx / 16;
+        let anchor_col = anchor_idx % 16;
+        for (op_idx, op) in pieces.iter().enumerate() {
+            if !board.has_piece(player, op.free_id) {
+                continue;
+            }
+            for &(pr_i, pc_i) in &op.cells {
+                let pr = pr_i as usize;
+                let pc = pc_i as usize;
+                if pr > anchor_row || pc > anchor_col {
+                    continue;
+                }
+                let origin_row = anchor_row - pr;
+                let origin_col = anchor_col - pc;
+                let placement = pre.get(op_idx, origin_row, origin_col);
+                if placement.is_empty() {
+                    continue;
+                }
+                if !seen.insert((op.free_id, placement)) {
+                    continue;
+                }
+                if board.placement_is_legal(player, op.free_id, placement) {
+                    result = result | placement;
+                }
+            }
+        }
+    }
+    result
+}
+
 /// Brute-force reference generator. Scans every (oriented_piece × board cell ×
 /// piece-cell) combination and uses [`Board::placement_is_legal_mask_free`] —
 /// i.e., legality is derived from raw `own[]` + `occupied` via neighbor shifts,
