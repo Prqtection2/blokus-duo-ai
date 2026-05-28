@@ -1,5 +1,13 @@
-// Blokus Duo GUI — G1 client.
-// All rules come from the server via legal_moves; we just render and forward.
+// Blokus Duo GUI client.
+// All rules come from the engine via legal_moves; we just render and forward.
+//
+// Transport-agnostic: every interaction goes through a global `BACKEND` object
+// defined by a backend script loaded before this one. Two backends exist:
+//   - backend-ws.js   : talks to the FastAPI server over WebSocket (native engine)
+//   - backend-wasm.js : runs the engine in-browser via WebAssembly (no server)
+// BACKEND must provide: init(handlers), newGame(side), attemptMove(pid, cells),
+// pass(), and optionally dumpPosition(). `handlers` = {onStaticMeta, onState,
+// onInfo, onError}.
 
 const BOARD_SIZE = 14;
 const CELL = 36;                  // pixels per cell on the board canvas
@@ -35,8 +43,6 @@ let legalMoveSet = null;           // Set of "pid|r,c;r,c;..." keys
 let legalByPiece = null;           // Map<free_id, Set<keyOf(cells)>>
 let selectedPiece = null;          // {pieceId, variantIdx} or null
 let hoverCell = null;              // [r, c] or null
-let ws = null;
-let connected = false;
 
 // ───────── Geometry helpers ─────────
 function normalize(cells) {
@@ -294,11 +300,7 @@ function tryPlace() {
     flashMessage("Not a legal placement.", true);
     return;
   }
-  ws.send(JSON.stringify({
-    type: "attempt_move",
-    piece_id: selectedPiece.pieceId,
-    cells: placement.cells,
-  }));
+  BACKEND.attemptMove(selectedPiece.pieceId, placement.cells);
   selectedPiece = null;
 }
 
@@ -341,14 +343,14 @@ els.newGame.addEventListener("click", () => {
   const humanSide = parseInt(els.humanSide.value, 10);
   selectedPiece = null;
   hoverCell = null;
-  ws.send(JSON.stringify({ type: "new_game", human_side: humanSide }));
+  BACKEND.newGame(humanSide);
 });
 els.pass.addEventListener("click", () => {
-  ws.send(JSON.stringify({ type: "pass" }));
+  BACKEND.pass();
 });
 if (els.dumpPos) {
   els.dumpPos.addEventListener("click", () => {
-    ws.send(JSON.stringify({ type: "dump_position" }));
+    if (BACKEND.dumpPosition) BACKEND.dumpPosition();
   });
 }
 if (els.heatmap) {
@@ -431,30 +433,10 @@ function onState(msg) {
   drawBoard();
 }
 
-function onMessage(ev) {
-  const msg = JSON.parse(ev.data);
-  if (msg.type === "static_meta") onStaticMeta(msg);
-  else if (msg.type === "state") onState(msg);
-  else if (msg.type === "rejected") flashMessage(`Rejected: ${msg.reason}`, true);
-  else if (msg.type === "error") flashMessage(`Error: ${msg.message}`, true);
-  else if (msg.type === "info") flashMessage(msg.message, false);
-}
-
-function connect() {
-  const wsUrl = `ws://${location.host}/ws`;
-  ws = new WebSocket(wsUrl);
-  ws.addEventListener("open", () => {
-    connected = true;
-    els.message.textContent = "Connected.";
-    setTimeout(() => els.message.classList.add("muted"), 800);
-  });
-  ws.addEventListener("close", () => {
-    connected = false;
-    els.message.textContent = "Disconnected — reconnecting…";
-    setTimeout(connect, 1500);
-  });
-  ws.addEventListener("message", onMessage);
-}
-
-connect();
+BACKEND.init({
+  onStaticMeta,
+  onState,
+  onInfo: (m) => flashMessage(m, false),
+  onError: (m) => flashMessage(m, true),
+});
 drawBoard();

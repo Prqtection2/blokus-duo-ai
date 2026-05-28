@@ -1,6 +1,12 @@
 //! Negamax alpha-beta with iterative deepening, transposition table, killer
 //! and history move-ordering heuristics.
 
+// `web-time` provides a working `Instant` on wasm32 (no system clock there);
+// on every other target it re-exports `std::time`, so this is a no-op natively.
+#[cfg(target_arch = "wasm32")]
+use web_time::{Duration, Instant};
+
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, Instant};
 
 use crate::board::{Board, Move};

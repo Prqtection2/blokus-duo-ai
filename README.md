@@ -32,6 +32,12 @@ crates/
     src/search.rs      Alpha-beta search and all its optimizations
   blokus-py/
     src/lib.rs         PyO3 bindings exposing the engine as the `blokus` module
+  blokus-wasm/
+    src/lib.rs         wasm-bindgen bindings: run the engine in a browser (WasmGame)
+web/                   Static site for the WebAssembly build (GitHub Pages)
+  index.html           Boots the WASM backend, then loads the shared renderer
+  backend-wasm.js      In-browser transport (runs the engine via WASM)
+  serve.py             Local test server with correct MIME types
 python/
   blokus_harness/
     players.py         EnginePlayer, GreedyPlayer, BlockerPlayer, ...
@@ -89,6 +95,41 @@ territory** to see the coverage heatmap:
 Engine strength is configured in `_default_engine_factory()` in
 [gui/server.py](python/blokus_harness/gui/server.py) (`time_budget_ms` and the
 eval `weights`).
+
+## Play in the browser (no install) — WebAssembly build
+
+The engine also compiles to WebAssembly so it can run entirely in a browser with
+no server. The static site lives in [web/](web/); a GitHub Actions workflow builds
+the WASM and publishes it to GitHub Pages on every push to `main`.
+
+**One-time setup:** in the repo's **Settings → Pages**, set **Source** to
+**GitHub Actions**. After the next push (or a manual run of the "Deploy WASM site
+to GitHub Pages" workflow), the site is live at
+`https://<user>.github.io/<repo>/`.
+
+**Build and test it locally:**
+
+```powershell
+# 1. Build the engine to WASM and generate JS bindings
+$env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
+cargo build --release --target wasm32-unknown-unknown -p blokus-wasm
+wasm-bindgen target\wasm32-unknown-unknown\release\blokus_wasm.wasm --out-dir web\pkg --target web
+
+# 2. Copy the shared frontend into web/ (CI does this automatically)
+Copy-Item python\blokus_harness\gui\static\main.js  web\main.js
+Copy-Item python\blokus_harness\gui\static\style.css web\style.css
+
+# 3. Serve it (correct MIME types for ES modules + WASM)
+.\.venv\Scripts\python.exe web\serve.py
+```
+
+Then open <http://localhost:8080>. Prerequisites: `rustup target add
+wasm32-unknown-unknown` and `cargo install wasm-bindgen-cli --version 0.2.100`.
+
+The browser build runs the search on the main thread, so the tab is briefly
+unresponsive (~1.5s, configurable in [web/backend-wasm.js](web/backend-wasm.js))
+during the engine's turn. The local FastAPI GUI (above) uses the faster native
+engine and is the better tool for development and diagnostics.
 
 ## Tests
 

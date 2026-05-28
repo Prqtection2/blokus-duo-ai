@@ -1,0 +1,83 @@
+name: Deploy WASM site to GitHub Pages
+
+# Builds the in-browser (WebAssembly) build of the engine and publishes the
+# static `web/` site to GitHub Pages. One-time setup: in the repo settings,
+# under Pages, set "Source" to "GitHub Actions".
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/**"
+      - "web/**"
+      - "python/blokus_harness/gui/static/**"
+      - ".github/workflows/deploy-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow one concurrent deployment; newer pushes supersede in-progress ones.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  WASM_BINDGEN_VERSION: "0.2.100"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust + wasm target
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add wasm32-unknown-unknown
+
+      - name: Cache cargo + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-wasm-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-wasm-
+
+      - name: Install wasm-bindgen-cli (prebuilt)
+        run: |
+          V="${WASM_BINDGEN_VERSION}"
+          curl -fsSL "https://github.com/rustwasm/wasm-bindgen/releases/download/${V}/wasm-bindgen-${V}-x86_64-unknown-linux-musl.tar.gz" | tar xzf -
+          echo "$PWD/wasm-bindgen-${V}-x86_64-unknown-linux-musl" >> "$GITHUB_PATH"
+
+      - name: Build engine to WASM
+        run: cargo build --release --target wasm32-unknown-unknown -p blokus-wasm
+
+      - name: Generate JS bindings
+        run: wasm-bindgen target/wasm32-unknown-unknown/release/blokus_wasm.wasm --out-dir web/pkg --target web
+
+      - name: Assemble site (copy shared frontend)
+        run: |
+          cp python/blokus_harness/gui/static/main.js web/main.js
+          cp python/blokus_harness/gui/static/style.css web/style.css
+          rm -f web/serve.py   # local-dev helper, not needed on Pages
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

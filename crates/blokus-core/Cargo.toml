@@ -9,6 +9,12 @@ description = "Blokus Duo engine core (pure Rust)."
 name = "blokus_core"
 path = "src/lib.rs"
 
+# On wasm32 there is no system clock; `std::time::Instant` panics. `web-time`
+# is a drop-in replacement backed by performance.now() in the browser. On all
+# other targets it simply re-exports std, so native builds are unaffected.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-time = "1"
+
 [dev-dependencies]
 criterion = "0.5"
 

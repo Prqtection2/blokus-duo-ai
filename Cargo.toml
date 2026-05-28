@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/blokus-core", "crates/blokus-py"]
+members = ["crates/blokus-core", "crates/blokus-py", "crates/blokus-wasm"]
 
 [workspace.package]
 version = "0.1.0"
